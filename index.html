@@ -529,6 +529,7 @@
       <button class="btn" id="act-update">🔄 Actualizar desde un archivo (sin perder tus marcas)</button>
       <button class="btn" id="act-csv">⬇️ Exportar a CSV</button>
       <button class="btn" id="act-xlsx">⬇️ Exportar a Excel (.xlsx)</button>
+      <button class="btn" id="act-dup">📑 Crear otra copia de esta colección (se rellena por separado)</button>
       <button class="btn" id="act-stats">🔢 Recalcular contadores</button>
       <button class="btn danger" onclick="deleteCurrentCollection()">🗑 Eliminar colección completa</button>
     </div>
@@ -591,7 +592,9 @@
       <p>En <b>⚙️ Ajustes</b> cambias el nombre, el icono, la categoría, editas las columnas, exportas a CSV/Excel o eliminas la colección.</p>
       <h3>8. Copia de seguridad</h3>
       <p>El botón <b>Copia de seguridad</b> descarga todo (colecciones, marcas, fotos e historial) en un archivo. Se recomienda hacerlo una vez al mes.</p>
-      <h3>9. Deshacer</h3>
+      <h3>9. Tener varias copias de una colección</h3>
+      <p>Si tienes el mismo álbum repetido, abre la colección y ve a <b>⚙️ Ajustes → 📑 Crear otra copia</b>. Se crea una colección nueva con los mismos elementos pero sin marcar, que se rellena aparte. Cada copia lleva su propia foto, descripción y fondo.</p>
+      <h3>10. Deshacer</h3>
       <p>Tras muchos cambios aparece un aviso con <b>Deshacer</b> unos segundos; en los formularios hay también un botón ↩️ Deshacer.</p>
     </div>
   </div>
@@ -2857,6 +2860,29 @@ $('act-fields').onclick = () => {
   renderFieldsEditor(); openModal('modal-libre-fields');
 };
 $('act-update').onclick = () => { closeModal('modal-settings'); openImport('update'); };
+$('act-dup').onclick = async () => {
+  const meta = currentCollectionMeta, src = currentCollectionId;
+  const base = String(meta.name).replace(/\s*\(copia \d+\)\s*$/i, '');
+  const usados = collectionsCache.filter(c => norm(c.name).startsWith(norm(base)) ).length;
+  const nombre = prompt('Nombre de la nueva copia:\n(Tendrá los mismos elementos, pero todo sin marcar y totalmente independiente de esta colección)', `${base} (copia ${usados + 1})`);
+  if (!nombre || !nombre.trim()) return;
+  closeModal('modal-settings');
+  try {
+    progress('Creando la copia...', 0, 1);
+    const esLista = meta.type !== 'libre';
+    const items = esLista ? currentItems.slice().sort((a, b) => (a.orden || 0) - (b.orden || 0)) : [];
+    const ref = await addDoc(collection(db, colPath()), {
+      name: nombre.trim(), icon: meta.icon || '', type: meta.type || 'checklist', categoria: meta.categoria || '', subcategoria: meta.subcategoria || '',
+      fields: (meta.fields || []).map(f => ({ ...f })), ...(meta.valorFijo ? { valorFijo: meta.valorFijo } : {}),
+      descripcion: meta.descripcion || '', stats: { total: items.length, tengo: 0 }, createdAt: serverTimestamp()
+    });
+    const ops = items.map((it, n) => ['set', doc(collection(db, itemsPath(ref.id))), { codigo: it.codigo, nombre: it.nombre || '', campos: { ...(it.campos || {}) }, tengo: false, repetido: false, notas: '', tieneFoto: false, orden: typeof it.orden === 'number' ? it.orden : n + 1, createdAt: serverTimestamp() }]);
+    await commitOps(ops, 'Creando la copia...');
+    endProgress();
+    showToast(esLista ? `Copia creada con ${items.length} elementos sin marcar` : 'Copia creada (vacía, con las mismas columnas)');
+    openCollection(ref.id);
+  } catch (err) { endProgress(); showToast('No se pudo crear la copia'); }
+};
 $('act-stats').onclick = async () => { await syncStats(true); closeModal('modal-settings'); showToast('Contadores recalculados'); };
 
 /* =========================================================================
